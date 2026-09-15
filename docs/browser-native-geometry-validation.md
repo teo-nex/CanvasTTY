@@ -27,6 +27,11 @@ The capture fixes address these cases:
   commit captures which can observe the temporary 4 DIP wheel sink. Resume
   capture after native bounds and viewport emulation have been restored.
 
+When a native child moves, shrinks to its wheel sink, or hides, the owner
+renderer is explicitly invalidated so newly exposed DOM content is repainted.
+Native navigation uses screen coordinates relative to the owner, keeping
+clipped/zoomed page coordinates out of the canvas drag calculation.
+
 The renderer displays a freeze image only during its active native-page freeze.
 Hiding a card first cancels the native wheel sink, then hides the native surface.
 A cached image is not displayed behind summary mode or other placeholder UI.

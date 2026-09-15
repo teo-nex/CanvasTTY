@@ -20,6 +20,7 @@ interface GeometryRuntime {
   activeTabId: string;
   tabs: Map<string, { view: WebContentsView }>;
   canvasGestures: BrowserCanvasGestureController;
+  canvasNavigationInput?: { readonly active: boolean } | null;
 }
 interface GeometryWorkspace {
   getState(): BrowserSnapshot;
@@ -361,12 +362,23 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
       const start = toScreen(clip.x + clip.width / 2, clip.y + clip.height / 2);
       const end = toScreen(clip.x + clip.width / 2 + 30, clip.y + clip.height / 2 + 20);
       const before = await scene();
-      await nativeInput("alt-drag", [start.x, start.y, end.x, end.y]);
+      const trace: Record<string, unknown>[] = [];
+      const observed = [owner.webContents, runtime.tabs.get(runtime.activeTabId)!.view.webContents].map((contents, index) => {
+        const keyboard = (_event: Electron.Event, input: Electron.Input) => trace.push({ source: index ? "page" : "canvas", kind: input.type,
+          key: input.key, alt: input.alt, navigationActive: runtime.canvasNavigationInput?.active });
+        const mouse = (_event: Electron.Event, input: Electron.MouseInputEvent) => trace.push({ source: index ? "page" : "canvas", kind: input.type,
+          x: input.x, y: input.y, globalX: input.globalX, globalY: input.globalY, modifiers: input.modifiers,
+          navigationActive: runtime.canvasNavigationInput?.active });
+        contents.on("before-input-event", keyboard); contents.on("before-mouse-event", mouse);
+        return () => { contents.removeListener("before-input-event", keyboard); contents.removeListener("before-mouse-event", mouse); };
+      });
+      try { await nativeInput("alt-drag", [start.x, start.y, end.x, end.y]); }
+      finally { for (const stop of observed) stop(); }
       await pause(400);
       const after = await scene();
-      assert.notEqual(after, before, "OS Alt+drag over the native page reaches canvas navigation");
+      assert.notEqual(after, before, `OS Alt+drag over the native page reaches canvas navigation: ${JSON.stringify(trace)}`);
       await geometry();
-      return { before, after };
+      return { before, after, trace };
     });
     for (const direction of ["n", "ne", "e", "se", "s", "sw", "w", "nw"]) {
       if (!rows.some((row) => row.status === "pass" && String(row.name).endsWith(`/${direction}`))) {
