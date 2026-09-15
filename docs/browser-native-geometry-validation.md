@@ -100,8 +100,9 @@ screenshots. These assertions do not replace inspection of the images.
 Controlled service-level checks cover clipping, freeze/sink restoration and
 page-scroll preservation after resize/zoom. Separate OS-input cases exercise
 focused page scrolling, unfocused canvas scrolling and Alt navigation dragging.
-Scroll comparisons allow one native DIP of Chromium zoom/emulation quantization;
-raw offsets and scale are retained. Five consecutive sink restores must also
+Fixed-scale scroll comparisons allow one native DIP of Chromium emulation
+quantization. A zoom-changing wheel may quantize at both its start and end
+scales; the bound is one DIP at each scale, with raw offsets/scales retained. Five consecutive sink restores must also
 stay within that total bound, rather than accumulating drift.
 
 ## Manual acceptance still required

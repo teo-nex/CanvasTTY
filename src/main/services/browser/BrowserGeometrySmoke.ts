@@ -71,8 +71,8 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
     console.log(`BROWSER_GEOMETRY_CHECK ${JSON.stringify(rows.at(-1))}`);
   };
   const nativeInput = async (kind: string, values: number[] = []) => {
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
-    await run(process.execPath, [process.env.CANVASTTY_GEOMETRY_INPUT!, kind, ...values.map(String)], { env, timeout: 15000 });
+    await run(process.env.CANVASTTY_GEOMETRY_NODE!, [process.env.CANVASTTY_GEOMETRY_INPUT!, kind, ...values.map(String)],
+      { env: process.env, timeout: 15000, windowsHide: true });
   };
   const toScreen = (x: number, y: number) => {
     const bounds = owner.getContentBounds();
@@ -86,8 +86,8 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
   };
   const screenshot = async (name: string, expectNative = true) => {
     const path = join(root, `${name}.png`);
-    await run(process.execPath, [process.env.CANVASTTY_GEOMETRY_INPUT!, "screenshot", path],
-      { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, timeout: 15000 });
+    await run(process.env.CANVASTTY_GEOMETRY_NODE!, [process.env.CANVASTTY_GEOMETRY_INPUT!, "screenshot", path],
+      { env: process.env, timeout: 15000, windowsHide: true });
     const image = nativeImage.createFromBuffer(await readFile(path));
     assert.ok(!image.isEmpty(), "desktop screenshot is not empty");
     const bitmap = image.toBitmap();
@@ -270,7 +270,20 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
         assert.ok(Math.abs(frame.width / frame.height - before.width / before.height) * before.height <= 2,
           `stable freeze frame matches the native viewport aspect: ${JSON.stringify({ frame, viewport: before })}`);
         assert.equal(frame.radius, "17px", "DOM freeze clipping matches the native page corners");
-        freezeScreenshot = await screenshot("freeze-frame");
+        try {
+          freezeScreenshot = await screenshot("freeze-frame");
+        } catch (error) {
+          const diagnostic = await evaluate('(() => {const el=document.querySelector(".browser-card__freeze-frame");const viewport=el.parentElement;return {src:el.src,rect:el.getBoundingClientRect().toJSON(),viewport:viewport.getBoundingClientRect().toJSON(),display:getComputedStyle(el).display,visibility:getComputedStyle(el).visibility,opacity:getComputedStyle(el).opacity};})()');
+          await writeFile(join(root, "freeze-content.png"), nativeImage.createFromDataURL(diagnostic.src).toPNG());
+          delete diagnostic.src;
+          const renderer = await owner.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
+          await writeFile(join(root, "freeze-renderer.png"), renderer.toPNG());
+          await screenshot("freeze-after-renderer-capture", false);
+          await writeFile(join(root, "freeze-diagnostic.json"), JSON.stringify({ ...diagnostic,
+            viewport: runtime.viewport, clip: runtime.clipView.getBounds(), view: runtime.tabs.get(runtime.activeTabId)!.view.getBounds(),
+            freezeActive: runtime.canvasGestures.isFreezeActive, ownerVisible: owner.isVisible(), ownerFocused: owner.isFocused() }, null, 2));
+          throw error;
+        }
         assert.ok(runtime.canvasGestures.isFreezeActive, "captured the active frozen composition");
       } finally { clearInterval(heartbeat); }
       service.setViewport({ ...before, x: -30, width: before.width + 80, canvasScale: 0.75 });
@@ -300,6 +313,7 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
         // Chromium quantizes scroll offsets at fractional zoom. Compare with
         // the observed offset, not the requested integer scrollTo arguments.
         const scrollBefore = await contents.executeJavaScript("({x:scrollX,y:scrollY})");
+        const scaleBefore = contents.getZoomFactor();
         const clip = clipBrowserViewportBounds(runtime.viewport, owner.getContentBounds())!;
         const point = toScreen(clip.x + clip.width / 2, clip.y + clip.height / 2);
         const before = await scene();
@@ -312,13 +326,16 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
           assert.equal(after, before, "focused page scrolling must not move the canvas");
         } else {
           const scale = contents.getZoomFactor();
-          assert.ok(Math.abs(page.x - scrollBefore.x) * scale <= 1.01
-            && Math.abs(page.y - scrollBefore.y) * scale <= 1.01,
-          `canvas wheel ownership preserves scroll within one native DIP: ${JSON.stringify({ scrollBefore, page, scale })}`);
+          // A zoom-changing wheel quantizes at both scales; a fixed-scale
+          // restore has only the one-DIP allowance tested again below.
+          const tolerance = Math.abs(scale - scaleBefore) > 0.001 ? 1 / scaleBefore + 1 / scale : 1 / scale;
+          assert.ok(Math.abs(page.x - scrollBefore.x) <= tolerance + 0.01
+            && Math.abs(page.y - scrollBefore.y) <= tolerance + 0.01,
+          `canvas wheel ownership preserves scroll within zoom quantization: ${JSON.stringify({ scrollBefore, page, scaleBefore, scale, tolerance })}`);
           assert.notEqual(after, before, "OS wheel over the unfocused page moves the canvas");
         }
         await geometry();
-        return { scrollBefore, page, before, after };
+        return { scrollBefore, page, scaleBefore, scaleAfter: contents.getZoomFactor(), before, after };
       });
     }
     await check("repeated-sink-scroll-quantization", async () => {
