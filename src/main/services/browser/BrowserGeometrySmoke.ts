@@ -265,8 +265,9 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
       const heartbeat = setInterval(() => runtime.canvasGestures.beginOwnerSequence(freezePoint, true), 80);
       let freezeScreenshot;
       try {
-        await wait('!!document.querySelector(".browser-card__freeze-frame")?.complete');
-        const frame = await evaluate('(() => {const el=document.querySelector(".browser-card__freeze-frame");return {width:el.naturalWidth,height:el.naturalHeight,radius:getComputedStyle(el.parentElement).borderRadius};})()');
+        const frameSelector = '.browser-card__viewport[data-browser-canvas-wheel-owner="canvas"] .browser-card__freeze-frame';
+        await wait(`!!document.querySelector(${JSON.stringify(frameSelector)})?.complete`);
+        const frame = await evaluate(`(() => {const el=document.querySelector(${JSON.stringify(frameSelector)});return {width:el.naturalWidth,height:el.naturalHeight,radius:getComputedStyle(el.parentElement).borderRadius};})()`);
         assert.ok(frame.width > 4, "freeze frame contains a full page, not the native wheel sink");
         assert.ok(Math.abs(frame.width / frame.height - before.width / before.height) * before.height <= 2,
           `stable freeze frame matches the native viewport aspect: ${JSON.stringify({ frame, viewport: before })}`);
@@ -274,7 +275,7 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
         try {
           freezeScreenshot = await screenshot("freeze-frame");
         } catch (error) {
-          const diagnostic = await evaluate('(() => {const el=document.querySelector(".browser-card__freeze-frame");const viewport=el.parentElement;return {src:el.src,rect:el.getBoundingClientRect().toJSON(),viewport:viewport.getBoundingClientRect().toJSON(),display:getComputedStyle(el).display,visibility:getComputedStyle(el).visibility,opacity:getComputedStyle(el).opacity};})()');
+          const diagnostic = await evaluate(`(() => {const el=document.querySelector(${JSON.stringify(frameSelector)});const viewport=el.parentElement;return {src:el.src,rect:el.getBoundingClientRect().toJSON(),viewport:viewport.getBoundingClientRect().toJSON(),display:getComputedStyle(el).display,visibility:getComputedStyle(el).visibility,opacity:getComputedStyle(el).opacity};})()`);
           await writeFile(join(root, "freeze-content.png"), nativeImage.createFromDataURL(diagnostic.src).toPNG());
           delete diagnostic.src;
           const renderer = await owner.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
@@ -358,6 +359,14 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
     });
     await check("native-alt-navigation-drag", async () => {
       const runtime = await ensureNativeSurface() as unknown as GeometryRuntime;
+      const page = runtime.tabs.get(runtime.activeTabId)!.view.webContents;
+      // View restoration can leave no keyboard target on Windows. Establish
+      // focus before pressing Alt, rather than letting mouseDown focus the page
+      // after the modifier keyDown has already gone to another window.
+      owner.focus();
+      page.focus();
+      await pause(150);
+      assert.ok(owner.isFocused() && page.isFocused(), "native page owns keyboard focus before Alt");
       const clip = clipBrowserViewportBounds(runtime.viewport, owner.getContentBounds())!;
       const start = toScreen(clip.x + clip.width / 2, clip.y + clip.height / 2);
       const end = toScreen(clip.x + clip.width / 2 + 30, clip.y + clip.height / 2 + 20);
@@ -376,6 +385,8 @@ export async function runBrowserGeometrySmoke(owner: BrowserWindow, input: unkno
       finally { for (const stop of observed) stop(); }
       await pause(400);
       const after = await scene();
+      assert.ok(trace.some((event) => event.kind === "keyDown" && event.key === "Alt" && event.alt === true),
+        `OS modifier keyDown reached the test window: ${JSON.stringify(trace)}`);
       assert.notEqual(after, before, `OS Alt+drag over the native page reaches canvas navigation: ${JSON.stringify(trace)}`);
       await geometry();
       return { before, after, trace };

@@ -32,7 +32,8 @@ renderer is explicitly invalidated so newly exposed DOM content is repainted.
 Native navigation uses screen coordinates relative to the owner, keeping
 clipped/zoomed page coordinates out of the canvas drag calculation.
 
-The renderer displays a freeze image only during its active native-page freeze.
+The renderer keeps the cached frame decoded and painted behind the native page
+before a gesture exposes it, avoiding an empty first frozen frame on macOS.
 Hiding a card first cancels the native wheel sink, then hides the native surface.
 A cached image is not displayed behind summary mode or other placeholder UI.
 The inset freeze viewport uses the same 17 px logical corner radius as the
