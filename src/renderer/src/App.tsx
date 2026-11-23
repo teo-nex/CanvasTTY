@@ -419,6 +419,8 @@ export function App(): React.JSX.Element {
   const fileRuntimeSpecs = useRef(new Map<string,string>());
   const fileRuntimeWorkspace = useRef('');
   const [hostFolder, setHostFolder] = useState<{ workspace: string; position?: Point; fileCardId?: string } | null>(null);
+  const hostFolderVisible = hostFolder && duoGuest && duoDocument && duoView.connected && duoView.reply?.state.manage &&
+    hostFolder.workspace === duoView.reply.state.workspaceId;
   const [launchProvider, setLaunchProvider] = useState<ProviderId | null>(null);
   const [launchPosition, setLaunchPosition] = useState<Point | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2301,7 +2303,7 @@ export function App(): React.JSX.Element {
           limitsLoadState={limitsLoadState}
           plugins={plugins}
           browser={browser}
-          browserViewVisible={!(duoFullCanvas && duoGuest && !duoDocument) && !duoRestricted && !settingsOpen && !usageHistoryOpen && !duoOpen && !shortcutReferenceOpen && launchProvider === null && pendingTerminalUrl === null && handoffRemarkIds === null}
+          browserViewVisible={!hostFolderVisible && !(duoFullCanvas && duoGuest && !duoDocument) && !duoRestricted && !settingsOpen && !usageHistoryOpen && !duoOpen && !shortcutReferenceOpen && launchProvider === null && pendingTerminalUrl === null && handoffRemarkIds === null}
           homeEditing={homeEditDraft !== null}
           camera={cameraStore}
           onCameraChange={changeCamera}
@@ -2398,8 +2400,7 @@ export function App(): React.JSX.Element {
       <Suspense fallback={null}>
         {shortcutReferenceOpen && <ShortcutReference settings={settings}
           onClose={() => setShortcutReferenceOpen(false)} />}
-        {hostFolder && duoGuest && duoDocument && duoView.connected && duoView.reply?.state.manage &&
-          hostFolder.workspace === duoView.reply.state.workspaceId && <HostFolderDialog workspace={hostFolder.workspace}
+        {hostFolderVisible && <HostFolderDialog workspace={hostFolder.workspace}
             ru={settings.locale === "ru"} onClose={() => setHostFolder(null)} filesOnly={Boolean(hostFolder.fileCardId)} onCreate={async (rootId, path) => {
               if (hostFolder.fileCardId) { navigateFileFolder(hostFolder.fileCardId, path); return; }
               const cards = duoWorkspace.get().reply?.snapshot?.cards ?? [];

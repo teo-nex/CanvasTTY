@@ -67,6 +67,11 @@ export class DuoDocumentService implements DuoDocumentPort {
     if (!connected()) throw Error('Duo session changed.');
     if(typeof channel!=='string'||!Array.isArray(args)||args.length>6||JSON.stringify(args).length>48_000)throw Error('Invalid Canvas resource request.');
     for(const [id,c] of this.chunks)if(Date.now()-c.at>60_000)this.chunks.delete(id);
+    if (channel === 'chunk-abandon') {
+      if (typeof args[0] !== 'string') throw Error('Invalid transfer ID.');
+      this.chunks.delete(args[0]);
+      return {value: null};
+    }
     if(channel==='chunk'){
       const [id,offset]=args as [string,number],c=this.chunks.get(id);
       if(!c||!Number.isSafeInteger(offset)||offset<0||offset>=c.text.length)throw Error('Canvas resource expired.');

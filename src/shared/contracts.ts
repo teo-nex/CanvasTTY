@@ -2020,7 +2020,7 @@ export interface CanvasTTYApi {
     list(): Promise<PixelSkinPackSummary[]>;
     install(request: PixelSkinPackInstallRequest): Promise<PixelSkinPackSummary>;
     installZip(request: PixelSkinZipInstallRequest): Promise<PixelSkinPackSummary>;
-    readAsset(id: PixelTerminalBorderSkinId, slot: PixelSkinSlot): Promise<Uint8Array | null>;
+    readAsset(id: PixelTerminalBorderSkinId, slot: PixelSkinSlot, source?: string): Promise<Uint8Array | null>;
     onChanged(listener: () => void): () => void;
   };
   agents: {

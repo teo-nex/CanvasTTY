@@ -362,7 +362,7 @@ export class CanvasDuoService {
       };
       const read = ['heartbeat', 'snapshot', 'updates', 'document-page', 'surface', 'file-can-open'].includes(value.action)
         || (value.action === 'resource' && (DUO_READ_CHANNELS.has(value.channel ?? '')
-          || ['protocol', 'chunk', 'browser-frame'].includes(value.channel ?? '')));
+          || ['protocol', 'chunk', 'chunk-abandon', 'browser-frame'].includes(value.channel ?? '')));
       // Slow capture/media/document reads must not hold keyboard input or the
       // lease heartbeat. Mutating requests retain arrival order and recheck
       // authorization at execution, including after Stop or Leave.
@@ -400,7 +400,7 @@ export class CanvasDuoService {
     if (!value || typeof value.id !== "string" || !/^[\w-]{1,80}$/.test(value.id) || typeof value.peer !== "string" || !/^[\w-]{1,80}$/.test(value.peer) || !Number.isFinite(value.at) || Math.abs(now - value.at) > 60_000) throw new Error("Expired request.");
     for (const [id, at] of this.seen) if (now - at > 120_000) this.seen.delete(id);
     const upload = value.action === 'resource' && value.channel === 'file-upload';
-    const chunk = value.action === 'resource' && value.channel === 'chunk';
+    const chunk = value.action === 'resource' && (value.channel === 'chunk' || value.channel === 'chunk-abandon');
     const pointer = value.action === 'cursor' && value.cardId === 'canvas' && this.documentSync;
     const lane = upload ? 'upload' : chunk ? 'chunk' : pointer ? 'pointer' : value.action === 'heartbeat' || value.action === 'document-page' ? value.action : 'control';
     const limit = lane === 'pointer' ? 12 : lane === 'upload' ? 16 : lane === 'heartbeat' ? 4 : (lane === 'document-page' || lane === 'chunk') ? 22 : 30;
@@ -430,7 +430,7 @@ export class CanvasDuoService {
   private async remote(command: RemoteAction): Promise<DuoSnapshot> {
     const generation = this.generation;
     if (command.action === 'heartbeat') return this.remoteNow(command);
-    if (command.action === 'resource' && command.channel === 'chunk') return this.requestBulk('chunk', command, generation);
+    if (command.action === 'resource' && (command.channel === 'chunk' || command.channel === 'chunk-abandon')) return this.requestBulk('chunk', command, generation);
     if (command.action === 'resource' && command.channel === 'file-upload') {
       // A single paced bulk slot leaves the normal queue and keepalive free.
       return this.requestBulk('upload', command, generation);

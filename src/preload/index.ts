@@ -163,7 +163,7 @@ const api: CanvasTTYApi = {
     list: () => invoke(IPC.pixelSkinsList),
     install: (request: PixelSkinPackInstallRequest) => invoke(IPC.pixelSkinsInstall, request),
     installZip: (request: PixelSkinZipInstallRequest) => invoke(IPC.pixelSkinsInstallZip, request),
-    readAsset: (id: PixelTerminalBorderSkinId, slot: PixelSkinSlot) => invoke(IPC.pixelSkinsReadAsset, id, slot),
+    readAsset: (id: PixelTerminalBorderSkinId, slot: PixelSkinSlot, source?: string) => invoke(IPC.pixelSkinsReadAsset, id, slot, source),
     onChanged: (listener: () => void) => subscribe<void>(IPC.pixelSkinsChanged, listener)
   },
   agents: {

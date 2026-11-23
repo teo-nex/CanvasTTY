@@ -1,3 +1,4 @@
+import { readDuoResource } from '../../shared/duoResources';
 import { AuthorThemeService } from "../services/AuthorThemeService";
 import { takeDuoInvitation } from "../services/DuoInvitation";
 import { registerDesktopWindowIpc } from "./desktopWindowIpc";
@@ -365,13 +366,16 @@ export function registerIpc(ipcMain: IpcRegistrar, {
     return updated;
   });
   setDuoAssetProxy(async request=>{
-    if(duo.state().role!=='guest'||!duo.state().documentSync)return null;
-    const call=async(channel:string,args:unknown[])=>{
-      const reply=await duo.command({action:'resource',channel,args});return reply.snapshot?.result as any;
+    const state = duo.state();
+    if (state.role !== 'guest' || !state.documentSync) return null;
+    const call = async (channel: string, args: unknown[]) => {
+      if (duo.state().workspaceId !== state.workspaceId) throw Error('Duo workspace changed.');
+      const reply = await duo.command({action:'resource', channel, args});
+      if (reply.state.workspaceId !== state.workspaceId) throw Error('Duo workspace changed.');
+      return reply.snapshot?.result;
     };
     try{
-      let part=await call('protocol',[request.url,request.headers.get('range')]);let value:any;
-      if(part.chunk){let text=part.data;while(text.length<part.total){part=await call('chunk',[part.chunk,text.length]);text+=part.data;}value=JSON.parse(text);}else value=part.value;
+      const value = await readDuoResource(call, 'protocol', [request.url, request.headers.get('range')]);
       return new Response(Buffer.from(value.body,'base64'),{status:value.status,headers:value.headers});
     }catch{return new Response('Shared asset unavailable.',{status:503});}
   });

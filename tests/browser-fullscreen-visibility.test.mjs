@@ -45,3 +45,20 @@ test("exiting fullscreen still respects every existing Browser visibility blocke
     assert.equal(evaluateVisibility(state), false, JSON.stringify(patch));
   }
 });
+
+test("the native browser yields only while the guest host-folder dialog is rendered", async () => {
+  const app = await readFile(new URL("../src/renderer/src/App.tsx", import.meta.url), "utf8");
+  const folder = app.match(/const hostFolderVisible = ([\s\S]*?);/)?.[1];
+  const visibility = app.match(/browserViewVisible=\{([^\n]+)\}/)?.[1];
+  assert.ok(folder && visibility && app.includes("{hostFolderVisible && <HostFolderDialog"));
+  const evaluate = new Function("state", `with (state) { const hostFolderVisible = (${folder}); return (${visibility}); }`);
+  const state = { hostFolder:{workspace:"one"}, duoGuest:true, duoDocument:true, duoFullCanvas:false,
+    duoView:{connected:true,reply:{state:{manage:true,workspaceId:"one"}}}, duoRestricted:false,
+    settingsOpen:false,usageHistoryOpen:false,duoOpen:false,shortcutReferenceOpen:false,
+    launchProvider:null,pendingTerminalUrl:null,handoffRemarkIds:null };
+  assert.equal(evaluate(state), false);
+  for (const change of [{hostFolder:null}, {duoGuest:false}, {duoDocument:false}, {hostFolder:{workspace:"two"}},
+    {duoView:{...state.duoView,connected:false}}, {duoView:{connected:true,reply:{state:{manage:false,workspaceId:"one"}}}}]) {
+    assert.equal(evaluate({...state, ...change}), true);
+  }
+});

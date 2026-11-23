@@ -272,3 +272,47 @@ test('discard an in-flight local skin read when the guest changes rooms', async 
   read.resolve(new Uint8Array([1]));
   await assert.rejects(pending, /workspace changed/);
 });
+
+test('a failed chunk releases only its host slot before the next read', async () => {
+  const bytes = new Uint8Array(310000).fill(11);
+  const service = new DuoDocumentService({get:initial}, async () => bytes);
+  const read = (channel, args) => service.resource(channel, args, () => false, false);
+  const other = await Promise.all(Array.from({length:7}, () => read(IPC.pixelSkinsReadAsset, ['other','background'])));
+  const state = {role:'guest', workspaceId:'transfer-room', documentSync:true};
+  let fail = true;
+  const router = createDuoDocumentRouter(async (channel, request) => {
+    if (channel === IPC.settingsGet) return initial();
+    if (request.channel === 'chunk' && fail) { fail = false; throw Error('interrupted chunk'); }
+    return {state, snapshot:{result:await read(request.channel, request.args)}};
+  }, () => {});
+  await router.accept({state, snapshot:{document:{settings:pickDuoSettings(initial()), materials, plugins:[], browser}}});
+  await assert.rejects(router.resource(IPC.pixelSkinsReadAsset, ['frame','background']), /interrupted chunk/);
+  assert.deepEqual(await router.resource(IPC.pixelSkinsReadAsset, ['replacement','background']), bytes);
+  for (const transfer of other) assert.equal((await read('chunk', [transfer.chunk, transfer.data.length])).chunk, transfer.chunk);
+});
+
+test('a skin cache key must match the source before local or guest IO starts', async () => {
+  const document = {settings:pickDuoSettings(initial()), materials, plugins:[], browser};
+  const local = {role:'idle'};
+  const remote = workspaceId => ({role:'guest', documentSync:true, workspaceId});
+  let reads = 0;
+  const router = createDuoDocumentRouter(async (channel) => {
+    if (channel === IPC.pixelSkinsReadAsset) { reads++; return new Uint8Array([7]); }
+    if (channel === IPC.settingsGet) return initial();
+    if (channel === IPC.materialsSnapshot) return materials;
+    if (channel === IPC.browserGetState) return browser;
+    throw Error('unexpected asset IO');
+  }, () => {});
+  const scoped = source => router.invoke(IPC.pixelSkinsReadAsset, 'pack', 'background', source);
+  await router.accept({state:remote('A'), snapshot:{document}});
+  await router.accept({state:remote('B')});
+  await assert.rejects(scoped('A'), /workspace changed/);
+  await assert.rejects(scoped('B'), /workspace changed/);
+  await router.accept({state:remote('B'), snapshot:{document}});
+  await assert.rejects(scoped('A'), /workspace changed/);
+  await assert.rejects(scoped('local'), /workspace changed/);
+  await router.accept({state:local});
+  await assert.rejects(scoped('B'), /workspace changed/);
+  assert.equal(reads, 0);
+  assert.deepEqual(await scoped('local'), new Uint8Array([7]));
+});

@@ -1,7 +1,7 @@
 import { IPC, type AppSettings, type PixelSkinPackSummary } from '../shared/contracts';
 import type { DuoReply } from '../shared/canvasDuo';
 import { DUO_SETTINGS_KEYS, duoSettingsOps, type DuoDocument, type DuoDocumentOp } from '../shared/duoDocument';
-import { DUO_RESOURCE_TRANSFER_LIMIT, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS, DUO_LOCAL_BROWSER_SENDS } from '../shared/duoResources';
+import { readDuoResource, DUO_RESOURCE_TRANSFER_LIMIT, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS, DUO_LOCAL_BROWSER_SENDS } from '../shared/duoResources';
 
 /** Routes only explicit Canvas capabilities. The global API and the local profile are never replaced. */
 export function createDuoDocumentRouter(raw:(channel:string,...args:any[])=>Promise<any>,emit:(channel:string,payload:any)=>void){
@@ -51,20 +51,13 @@ export function createDuoDocumentRouter(raw:(channel:string,...args:any[])=>Prom
   const command=async(command:unknown):Promise<DuoReply>=>accept(await raw(IPC.duoCommand,command));
   const readResource=async(channel:string,args:unknown[]):Promise<any>=>{
     const active=workspace;
-    let reply=await command({action:'resource',channel,args});let part=reply.snapshot?.result as any;
-    if(part?.chunk){
-      let text=part.data;const total=part.total,id=part.chunk;
-      if(!Number.isSafeInteger(total)||total>32*1024*1024)throw Error('Invalid shared resource size.');
-      while(text.length<total){
-        if(workspace!==active)throw Error('Duo workspace changed.');
-        reply=await command({action:'resource',channel:'chunk',args:[id,text.length]});part=reply.snapshot?.result;
-        if(!part||part.chunk!==id||part.offset!==text.length||typeof part.data!=='string'||!part.data.length)throw Error('Invalid shared resource chunk.');
-        text+=part.data;
-      }
-      part = { value: JSON.parse(text) };
-    }
-    if (workspace !== active) throw Error("Duo workspace changed.");
-    const value = part?.value;
+    const value = await readDuoResource(async (name, parameters) => {
+      if (workspace !== active) throw Error('Duo workspace changed.');
+      const reply = await raw(IPC.duoCommand, {action:'resource', channel:name, args:parameters}) as DuoReply;
+      if (workspace !== active || reply.state.workspaceId !== active) throw Error('Duo workspace changed.');
+      return reply.snapshot?.result;
+    }, channel, args);
+    if (workspace !== active) throw Error('Duo workspace changed.');
     if (value && typeof value.base64 === 'string' &&
         [IPC.wallpapersRead, IPC.pixelSkinsReadAsset, IPC.authorThemesPreview].some(key => key === channel)) {
       const bytes = Uint8Array.from(atob(value.base64), char => char.charCodeAt(0));
@@ -90,6 +83,19 @@ export function createDuoDocumentRouter(raw:(channel:string,...args:any[])=>Prom
   };
   const invoke=async(channel:string,...args:any[]):Promise<any>=>{
     if(channel===IPC.duoCommand)return command(args[0]);
+    if (channel === IPC.pixelSkinsReadAsset) {
+      const [id, slot, source] = args;
+      const active = workspace;
+      if (source !== undefined && (source !== (active || 'local') || (active && !document))) {
+        throw Error('Duo workspace changed.');
+      }
+      args = [id, slot];
+      if (!document) {
+        const bytes = await raw(channel, ...args);
+        if (active !== workspace) throw Error('Duo workspace changed.');
+        return bytes;
+      }
+    }
     if(!document)return raw(channel,...args);
     if(channel===IPC.authorThemesApply)throw new Error("Only the host can apply a theme in a shared Canvas.");
     if(channel===IPC.settingsGet)return {...localSettings,...document.settings};

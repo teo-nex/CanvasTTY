@@ -57,8 +57,8 @@ function skinSource(): string {
 // A terminal frame and the workspace background have independent lifetimes and transfers.
 const assets = createReleasingCache<string, PackAsset>({
   load: async key => {
-    const [id, slot] = key.split("/") as [PixelTerminalBorderSkinId, PixelSkinSlot];
-    const bytes = await window.canvasTTY.pixelSkins.readAsset(id, slot);
+    const [id, slot, source] = key.split("/") as [PixelTerminalBorderSkinId, PixelSkinSlot, string];
+    const bytes = await window.canvasTTY.pixelSkins.readAsset(id, slot, source);
     if (!bytes) throw new Error(`Pixel skin asset ${slot} is unavailable.`);
     const { inspectSkinMedia, SKIN_MEDIA_MIME } = await import("../../../../shared/skinMedia");
     const copy = new Uint8Array(bytes);
