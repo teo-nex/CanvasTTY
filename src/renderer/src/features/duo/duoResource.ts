@@ -1,4 +1,4 @@
-import { readDuoResource } from "../../../../shared/duoResources";
+import { readDuoResource } from "../../../../shared/readDuoResource";
 import { duoWorkspace } from "./duoWorkspaceRuntime";
 
 /** The host exposes a bounded, explicit resource API, never arbitrary renderer IPC. */

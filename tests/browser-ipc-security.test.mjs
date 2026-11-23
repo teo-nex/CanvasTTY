@@ -4,6 +4,7 @@ import * as fileSystem from "node:fs/promises";
 import * as url from "node:url";
 import * as paths from "node:path";
 import * as crypto from "node:crypto";
+import * as resourceReader from "../src/shared/readDuoResource.ts";
 import * as duoDocument from "../src/shared/duoDocument.ts";
 import * as duoFiles from "../src/main/services/DuoFileTransferService.ts";
 import { runInNewContext } from "node:vm";
@@ -42,6 +43,7 @@ async function ipcModules({ platform = process.platform, shell = {}, terminalFil
     "../services/DuoDocumentService": {DuoDocumentService:class{clear(){}},setDuoAssetProxy(){},setDuoStorageReceiver(){}},
     "../services/DuoFileTransferService":duoFiles,
     "../../shared/duoDocument":duoDocument,
+    "../../shared/readDuoResource":resourceReader,
     "node:path":paths,"node:crypto":crypto,
     electron: { shell, app: { getPath: () => tmpdir(), getVersion:()=>"1.8.7", once() {} } },
     "../services/workspacePresetLayout": workspacePresetLayout,

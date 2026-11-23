@@ -1,7 +1,8 @@
 import { IPC, type AppSettings, type PixelSkinPackSummary } from '../shared/contracts';
 import type { DuoReply } from '../shared/canvasDuo';
 import { DUO_SETTINGS_KEYS, duoSettingsOps, type DuoDocument, type DuoDocumentOp } from '../shared/duoDocument';
-import { readDuoResource, DUO_RESOURCE_TRANSFER_LIMIT, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS, DUO_LOCAL_BROWSER_SENDS } from '../shared/duoResources';
+import { readDuoResource } from '../shared/readDuoResource';
+import { DUO_RESOURCE_TRANSFER_LIMIT, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS, DUO_LOCAL_BROWSER_SENDS } from '../shared/duoResources';
 
 /** Routes only explicit Canvas capabilities. The global API and the local profile are never replaced. */
 export function createDuoDocumentRouter(raw:(channel:string,...args:any[])=>Promise<any>,emit:(channel:string,payload:any)=>void){

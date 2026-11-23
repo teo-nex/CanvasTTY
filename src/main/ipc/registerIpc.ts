@@ -1,4 +1,4 @@
-import { readDuoResource } from '../../shared/duoResources';
+import { readDuoResource } from '../../shared/readDuoResource';
 import { AuthorThemeService } from "../services/AuthorThemeService";
 import { takeDuoInvitation } from "../services/DuoInvitation";
 import { registerDesktopWindowIpc } from "./desktopWindowIpc";
