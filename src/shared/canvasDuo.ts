@@ -17,7 +17,7 @@ export function normalizeDuoCursorNickname(value: unknown): string | undefined {
 }
 
 export interface DuoCard {
-  participant?: "host" | "guest";
+  participant?: "host" | "guest" | "previous-guest";
   focusedBy?: string[];
   id: string;
   title: string;

@@ -1,10 +1,12 @@
+export const MAX_DUO_RESOURCE_CHARS = 32 * 1024 * 1024;
+
 /** Finish a paged host result, releasing its slot if a continuation fails. */
-export async function readDuoResource(call: (channel: string, args: unknown[]) => Promise<any>, channel: string, args: unknown[]): Promise<any> {
+export async function readDuoResource(call: (channel: string, args: unknown[]) => Promise<any>, channel: string, args: unknown[], maxChars = MAX_DUO_RESOURCE_CHARS): Promise<any> {
   const first = await call(channel, args);
   if (!first?.chunk) return first?.value;
   const {chunk: id, total} = first;
   try {
-    if (!Number.isSafeInteger(total) || total > 32 * 1024 * 1024 || first.offset !== 0 ||
+    if (!Number.isSafeInteger(total) || total > maxChars || first.offset !== 0 ||
         typeof first.data !== 'string' || !first.data.length || first.data.length > total) {
       throw Error('Invalid shared resource size.');
     }

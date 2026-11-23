@@ -61,4 +61,16 @@ test("the native browser yields only while the guest host-folder dialog is rende
     {duoView:{...state.duoView,connected:false}}, {duoView:{connected:true,reply:{state:{manage:false,workspaceId:"one"}}}}]) {
     assert.equal(evaluate({...state, ...change}), true);
   }
+
+  // Exercise App's render-time transition with a state setter across successive renders.
+  const transition = app.slice(app.indexOf("const hostFolderVisible ="), app.indexOf("const [launchProvider,"));
+  const render = new Function("state", "setHostFolder", `with (state) { ${transition} return Boolean(hostFolderVisible); }`);
+  const setFolder = request => { state.hostFolder = request; };
+  assert.equal(render(state, setFolder), true);
+  state.duoView.reply.state.manage = false;
+  assert.equal(render(state, setFolder), false);
+  state.duoView.reply.state.manage = true;
+  assert.equal(render(state, setFolder), false, "restoring control must not reopen the old request");
+  setFolder({workspace:"one"});
+  assert.equal(render(state, setFolder), true, "a new user action can still open the picker");
 });

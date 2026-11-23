@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server, type IncomingMessage } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { networkInterfaces } from "node:os";
@@ -97,7 +97,9 @@ export class CanvasDuoService {
   private peerClient: DuoPeerTransport | null = null;
   private key: Buffer | null = null;
   private guest: Invite | null = null;
-  private peerId = randomUUID();
+  // A guest can rejoin the same room during this app session without sharing an ID across rooms.
+  private readonly participantSecret = randomBytes(32);
+  private peerId = "";
   private connectedPeer = "";
   private peerEpoch = 0;
   private peerLastSeen = 0;
@@ -121,7 +123,7 @@ export class CanvasDuoService {
   private comments: DuoComment[] = [];
   private focus = new Map<string, string>();
   private profiles = new Map<string, Pick<DuoCursor, 'nickname' | 'design'>>();
-  private terminalAuthors = new Map<string, "host" | "guest">();
+  private guestTerminalCreators = new Map<string, string>();
   private cursors = new Map<string, DuoCursor>();
   private screens = new Map<string, SessionScreen>();
   private snapshotPending: Promise<DuoSnapshot> | null = null;
@@ -201,8 +203,14 @@ export class CanvasDuoService {
 
   private hosting(): boolean { return Boolean(this.server || this.peerHost); }
 
+  private terminalParticipant(id: string): DuoCard["participant"] {
+    const creator = this.guestTerminalCreators.get(id);
+    if (!creator) return "host";
+    return creator === this.connectedPeer ? "guest" : "previous-guest";
+  }
+
   private available(): DuoCard[] {
-    return this.terminals.listMetadata().map(s => ({ id: s.id, title: s.title, focusedBy: [...this.focus].filter(([, id]) => id === s.id).map(([role]) => this.identity(role).nickname ?? role), participant: this.terminalAuthors.get(s.id) ?? 'host', provider: s.provider, role: s.role, status: s.status, turnCompleted: s.turnCompleted, running: s.exitCode === null, control: this.documentSync ? this.manage : this.controlled.has(s.id), position: s.position, size: s.size, revision: s.revision, nativeEditor: s.nativeEditor }));
+    return this.terminals.listMetadata().map(s => ({ id: s.id, title: s.title, focusedBy: [...this.focus].filter(([, id]) => id === s.id).map(([role]) => this.identity(role).nickname ?? role), participant: this.terminalParticipant(s.id), provider: s.provider, role: s.role, status: s.status, turnCompleted: s.turnCompleted, running: s.exitCode === null, control: this.documentSync ? this.manage : this.controlled.has(s.id), position: s.position, size: s.size, revision: s.revision, nativeEditor: s.nativeEditor }));
   }
   private expirePeer(): void {
     if (!this.connectedPeer || Date.now() - this.peerLastSeen <= PEER_LEASE_MS) return;
@@ -212,6 +220,7 @@ export class CanvasDuoService {
   private releaseGuest(): void {
     this.connectedPeer = "";
     this.peerLastSeen = 0;
+    this.snapshotPending = null;
     this.documentPages.clear();
     this.controlled.clear();
     this.manage = false;
@@ -321,7 +330,8 @@ export class CanvasDuoService {
       try { invite = parseDuoInvite(command.invite); } catch { this.diagnostics.begin('guest','p2p').record('invitation-invalid',new Error('Invalid Canvas Duo invitation.')); throw new Error('Invalid Canvas Duo invitation.'); }
       await this.stop();
       const trace = this.diagnostics.begin('guest',invite.version===3?'p2p':'lan'); this.trace=trace;
-      this.guest = invite; this.peerId = randomUUID();
+      this.guest = invite;
+      this.peerId = createHmac("sha256", this.participantSecret).update(invite.key).digest("hex");
       const generation = this.generation;
       try {
         if(invite.version===3) { const abort=new AbortController();this.connectAbort=abort;const client=await DuoPeerTransport.join(invite,this.options.peerOptions,abort.signal,trace); if(generation!==this.generation){await client.stop();throw new Error("Duo connection cancelled.");} this.peerClient=client; }
@@ -613,7 +623,7 @@ export class CanvasDuoService {
         cwd = selected;
       }
       const session=this.terminals.create({provider:'terminal',profile:'normal',cwd,position:{x:command.x,y:command.y},title:'Duo · Terminal'});
-      this.terminalAuthors.set(session.id, author);
+      if (author === 'guest') this.guestTerminalCreators.set(session.id, this.connectedPeer);
       createdId=session.id;this.selected.add(session.id);if(this.manage)this.controlled.add(session.id);
     } else if (command.action !== "snapshot" && command.action !== 'updates') {
       const id = command.cardId;
@@ -743,7 +753,7 @@ export class CanvasDuoService {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer); this.heartbeatTimer = null;
     if (this.updatesTimer) clearTimeout(this.updatesTimer); this.updatesTimer = null;
     this.updateSnapshot=undefined;this.reconnectAfter=0;this.reconnectAttempts=0;this.reconnectPending=null;
-    this.terminalAuthors.clear(); this.focus.clear(); this.profiles.clear();
+    this.guestTerminalCreators.clear(); this.focus.clear(); this.profiles.clear();
     this.invites = []; this.selected.clear(); this.controlled.clear(); this.comments = []; this.cursors.clear(); this.seen.clear(); this.requests.clear(); this.documentPages.clear(); this.outputCursor = 0;
     for (const screen of this.screens.values()) screen.dispose(); this.screens.clear(); this.snapshotPending = null;
     this.published='';this.publish({state:this.state()});

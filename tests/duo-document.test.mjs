@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { WallpaperRegistry } from '../src/main/services/WallpaperRegistry.ts';
+import { DEFAULT_WALLPAPER_RECIPE, MAX_WALLPAPER_BYTES } from '../src/shared/wallpaper.ts';
+import { readDuoResource } from '../src/shared/readDuoResource.ts';
 import {buildSync} from 'esbuild';
 import {CanvasDuoService,parseDuoInvite} from '../src/main/services/CanvasDuoService.ts';
 import {duoWorkspace,duoTerminalTransport,duoSession} from '../src/renderer/src/features/duo/duoWorkspaceRuntime.ts';
@@ -18,7 +25,15 @@ function pair(t,options={}){
  t.after(()=>Promise.all([host.stop(),guest.stop()]));
  return {host,guest,doc,cards,writes,calls,get:()=>settings,set:p=>{settings={...settings,...p};},append:text=>{buffer+=text;}};
 }
-async function connect(p,manage=true){const h=await p.host.command({action:'host',transport:'lan',selected:[],controlled:[],fullCanvas:true,documentSync:true,manage});const i=parseDuoInvite(h.state.invites[0]);i.host='127.0.0.1';return p.guest.command({action:'join',invite:'canvasduo://'+Buffer.from(JSON.stringify(i)).toString('base64url')});}
+function loopbackInvite(state) {
+  const invite = parseDuoInvite(state.invites[0]);
+  invite.host = '127.0.0.1';
+  return 'canvasduo://' + Buffer.from(JSON.stringify(invite)).toString('base64url');
+}
+async function connect(p,manage=true){
+  const h=await p.host.command({action:'host',transport:'lan',selected:[],controlled:[],fullCanvas:true,documentSync:true,manage});
+  return p.guest.command({action:'join',invite:loopbackInvite(h.state)});
+}
 
 test('shared document has no camera, focus, accounts, shortcuts or private profile settings',()=>{
  const doc=pickDuoSettings({...initial(),camera:{x:1,zoom:9},activeSessionId:'private',apiKey:'secret',uiScale:2});
@@ -194,18 +209,65 @@ test('host directory handles, participant focus and cursor acknowledgements cros
  await assert.rejects(p.guest.command({action:'create',rootId,x:0,y:0}),/no longer available/);
 });
 
-test('shared wallpaper bytes survive JSON and multiple resource pages',async () => {
- const bytes = Uint8Array.from({length:200000},(_,i)=>i%251);
- const service = new DuoDocumentService({get:initial},async()=>({summary:{name:'clock'},bytes}),async()=>null,()=>{},async()=>null);
- const state = {role:'guest',documentSync:true,workspaceId:'binary-test'};
- const router = createDuoDocumentRouter(async(channel,request)=>{
-   if(channel===IPC.settingsGet)return initial();
-   return {state,snapshot:{result:await service.resource(request.channel,request.args,()=>true,true)}};
- },()=>{});
- await router.accept({state,snapshot:{document:{settings:pickDuoSettings(initial()),materials,plugins:[],browser}}});
- const result=await router.invoke(IPC.wallpapersRead,'shared');
- assert.deepEqual(result.bytes,bytes);
- assert.equal(result.summary.name,'clock');
+test('replacing and rejoining guests see terminal creators relative to the active participant', async t => {
+  const {host, guest: a} = pair(t);
+  const b = new CanvasDuoService({listMetadata: () => []});
+  t.after(() => b.stop());
+  await connect({host, guest: a});
+  const joinRoom = {action: 'join', invite: loopbackInvite(host.state())};
+  const create = {action: 'create', x: 0, y: 0};
+  await host.command(create);
+  await a.command(create);
+  await a.command({action: 'stop'});
+
+  const owners = reply => reply.snapshot.cards.map(card => card.participant);
+  assert.deepEqual(owners(await b.command(joinRoom)), ['host', 'previous-guest']);
+  await host.command({action:'select', selected:[], controlled:[], manage:true});
+  assert.deepEqual(owners(await b.command(create)), ['host', 'previous-guest', 'guest']);
+  await b.command({action: 'stop'});
+  assert.deepEqual(owners(await a.command(joinRoom)), ['host', 'guest', 'previous-guest']);
+  assert.deepEqual(host.state().available.map(card => card.participant), ['host', 'guest', 'previous-guest']);
+});
+
+test('guest reads complete installed MP4 wallpapers at 25 MiB and the 80 MiB media limit', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'canvas-duo-wallpaper-'));
+  t.after(() => rm(dir, {recursive:true, force:true}));
+  const registry = new WallpaperRegistry(dir);
+  await registry.initialize();
+  const mp4 = await readFile(new URL('./fixtures/live-skins/background.mp4', import.meta.url));
+  const service = new DuoDocumentService({get:initial}, (_channel, [id]) => registry.read(id));
+  const state = {role:'guest',documentSync:true,workspaceId:'wallpaper-test'};
+  const router = createDuoDocumentRouter(async(channel,request)=>{
+    if(channel===IPC.settingsGet)return initial();
+    return {state,snapshot:{result:await service.resource(request.channel,request.args,()=>true,true)}};
+  },()=>{});
+  await router.accept({state,snapshot:{document:{settings:pickDuoSettings(initial()),materials,plugins:[],browser}}});
+
+  for (const size of [25 * 1024 * 1024, MAX_WALLPAPER_BYTES]) {
+    const media = Buffer.alloc(size, 0x6a);
+    mp4.copy(media);
+    // A legal MP4 padding box preserves the playable track.
+    media.writeUInt32BE(size - mp4.length, mp4.length);
+    media.write('free', mp4.length + 4);
+    const summary = await registry.install({name:'Duo video', bytes:media, width:320, height:200, recipe:DEFAULT_WALLPAPER_RECIPE});
+    const result = await router.invoke(IPC.wallpapersRead, summary.id);
+    assert.deepEqual(result.summary, summary);
+    assert.equal(result.bytes.length, size);
+    const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+    assert.equal(digest(result.bytes), digest(media));
+  }
+});
+
+test('unrelated Duo resources retain their 32 MiB result limit on both sides', async () => {
+  const bytes = new Uint8Array(25 * 1024 * 1024);
+  const service = new DuoDocumentService({get:initial}, async () => bytes);
+  await assert.rejects(service.resource(IPC.pixelSkinsReadAsset, [], () => true, true), /too large/);
+  const calls = [];
+  await assert.rejects(readDuoResource(async channel => {
+    calls.push(channel);
+    return {chunk:'test', offset:0, total:32 * 1024 * 1024 + 1, data:'a'};
+  }, IPC.pixelSkinsReadAsset, []), /Invalid shared resource size/);
+  assert.deepEqual(calls, [IPC.pixelSkinsReadAsset, 'chunk-abandon']);
 });
 
 test('parallel theme assets finish without evicting a still-visible frame', async () => {

@@ -1720,6 +1720,7 @@ function DuoTerminalParticipants({ sessionId, locale }: { sessionId: string; loc
   });
   const ru = locale === "ru";
   const ownerLabel = participant === viewer ? (ru ? "Мой терминал" : "My terminal")
+    : participant === "previous-guest" ? (ru ? "Терминал предыдущего гостя" : "Previous guest’s terminal")
     : participant === "guest" ? (ru ? "Терминал гостя" : "Guest terminal") : (ru ? "Терминал хоста" : "Host terminal");
   return <>
     {participant && <span className="terminal-card__role duo-terminal-owner" data-duo-participant={participant}

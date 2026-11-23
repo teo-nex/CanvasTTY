@@ -3,8 +3,10 @@ import { IPC, type AppSettings, type FileRootDescriptor, type FileRootReference 
 import { applyDuoSettingsOps, pickDuoSettings, type DuoDocument, type DuoDocumentOp, type DuoDocumentPort } from '../../shared/duoDocument';
 import { DUO_RESOURCE_TRANSFER_LIMIT, DUO_FILE_READ_CHANNELS, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS } from '../../shared/duoResources';
 import type { DuoFileTransferService } from './DuoFileTransferService';
+import { MAX_WALLPAPER_BYTES, MAX_WALLPAPER_PACKAGE_BYTES } from '../../shared/wallpaper';
+import { MAX_DUO_RESOURCE_CHARS } from '../../shared/readDuoResource';
 
-const CHUNK=128_000, MAX_RESULT=32*1024*1024;
+const CHUNK = 128_000;
 
 function isPluginShared(settings: AppSettings, pluginId: string): boolean {
   return settings.pluginCanvas.some(card => card.pluginId === pluginId)
@@ -121,9 +123,9 @@ export class DuoDocumentService implements DuoDocumentPort {
         headers.set('range',`bytes=${start}-${end}`);
       }
       const response=await this.protocol(new Request(url,{headers}));
-      const length=Number(response.headers.get('content-length')||0);if(length>MAX_RESULT)throw Error('Shared asset is too large.');
+      const length=Number(response.headers.get('content-length')||0);if(length>MAX_DUO_RESOURCE_CHARS)throw Error('Shared asset is too large.');
       const reader=response.body?.getReader(),parts:Uint8Array[]=[];let size=0;
-      if(reader)try{while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>MAX_RESULT)throw Error('Shared asset is too large.');parts.push(p.value);}}finally{await reader.cancel().catch(()=>undefined);}
+      if(reader)try{while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>MAX_DUO_RESOURCE_CHARS)throw Error('Shared asset is too large.');parts.push(p.value);}}finally{await reader.cancel().catch(()=>undefined);}
       result={status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.concat(parts).toString('base64')};
     }else if(channel==='browser-frame'||channel==='browser-input'){
       result=await this.browserResource(channel,args,authorized);
@@ -153,9 +155,11 @@ export class DuoDocumentService implements DuoDocumentPort {
       result = { base64: Buffer.from(result).toString('base64') };
     } else if (channel === IPC.wallpapersRead && result) {
       const { summary, bytes } = result as { summary: unknown; bytes: Uint8Array };
-      result = { summary, base64: Buffer.from(bytes).toString('base64') };
+      if (bytes.byteLength > MAX_WALLPAPER_BYTES) throw Error('Wallpaper media is too large.');
+      result = { summary, base64: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64') };
     }
-    const text=JSON.stringify(result??null);if(text.length>MAX_RESULT)throw Error('Canvas resource is too large.');
+    const maxChars = channel === IPC.wallpapersRead ? MAX_WALLPAPER_PACKAGE_BYTES : MAX_DUO_RESOURCE_CHARS;
+    const text=JSON.stringify(result??null);if(text.length>maxChars)throw Error('Canvas resource is too large.');
     if(text.length<=CHUNK)return {value:result??null};
     if (this.chunks.size >= DUO_RESOURCE_TRANSFER_LIMIT) throw Error("Too many active shared resource transfers.");
     const id=randomUUID();this.chunks.set(id,{text,at:Date.now(),allowed});

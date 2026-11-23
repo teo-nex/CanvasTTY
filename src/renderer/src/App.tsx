@@ -421,6 +421,7 @@ export function App(): React.JSX.Element {
   const [hostFolder, setHostFolder] = useState<{ workspace: string; position?: Point; fileCardId?: string } | null>(null);
   const hostFolderVisible = hostFolder && duoGuest && duoDocument && duoView.connected && duoView.reply?.state.manage &&
     hostFolder.workspace === duoView.reply.state.workspaceId;
+  if (hostFolder && !hostFolderVisible) setHostFolder(null);
   const [launchProvider, setLaunchProvider] = useState<ProviderId | null>(null);
   const [launchPosition, setLaunchPosition] = useState<Point | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);

@@ -1,6 +1,7 @@
 import { IPC, type AppSettings, type PixelSkinPackSummary } from '../shared/contracts';
 import type { DuoReply } from '../shared/canvasDuo';
 import { DUO_SETTINGS_KEYS, duoSettingsOps, type DuoDocument, type DuoDocumentOp } from '../shared/duoDocument';
+import { MAX_WALLPAPER_PACKAGE_BYTES } from '../shared/wallpaper';
 import { readDuoResource } from '../shared/readDuoResource';
 import { DUO_RESOURCE_TRANSFER_LIMIT, DUO_READ_CHANNELS, DUO_WRITE_CHANNELS, DUO_LOCAL_BROWSER_SENDS } from '../shared/duoResources';
 
@@ -57,11 +58,13 @@ export function createDuoDocumentRouter(raw:(channel:string,...args:any[])=>Prom
       const reply = await raw(IPC.duoCommand, {action:'resource', channel:name, args:parameters}) as DuoReply;
       if (workspace !== active || reply.state.workspaceId !== active) throw Error('Duo workspace changed.');
       return reply.snapshot?.result;
-    }, channel, args);
+    }, channel, args, channel === IPC.wallpapersRead ? MAX_WALLPAPER_PACKAGE_BYTES : undefined);
     if (workspace !== active) throw Error('Duo workspace changed.');
     if (value && typeof value.base64 === 'string' &&
         [IPC.wallpapersRead, IPC.pixelSkinsReadAsset, IPC.authorThemesPreview].some(key => key === channel)) {
-      const bytes = Uint8Array.from(atob(value.base64), char => char.charCodeAt(0));
+      const decoded = atob(value.base64);
+      const bytes = new Uint8Array(decoded.length);
+      for (let i = 0; i < decoded.length; i++) bytes[i] = decoded.charCodeAt(i);
       return channel === IPC.wallpapersRead ? { summary: value.summary, bytes } : bytes;
     }
     return value;

@@ -275,6 +275,7 @@ function DuoTerminalPicker({ cards, viewer, ru, onFocusTerminal }: {
   const groups = [
     { role: viewer, label: ru ? "Мои терминалы" : "My terminals" },
     { role: other, label: other === "host" ? (ru ? "Терминалы хоста" : "Host terminals") : (ru ? "Терминалы гостя" : "Guest terminals") },
+    { role: "previous-guest", label: ru ? "Терминалы предыдущих гостей" : "Previous guests’ terminals" },
     { role: undefined, label: ru ? "Общие терминалы" : "Shared terminals" }
   ];
   const label = ru ? "Перейти к терминалу" : "Go to terminal";
